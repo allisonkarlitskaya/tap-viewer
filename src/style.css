@@ -1,0 +1,15 @@
+.skipped .accordion-button {
+    background-color: var(--bs-warning-bg-subtle);
+}
+
+.xfailed .accordion-button {
+    background-color: var(--bs-warning-bg-subtle);
+}
+
+.xpassed .accordion-button {
+    background-color: var(--bs-warning-bg-subtle);
+}
+
+.failed .accordion-button {
+    background-color: var(--bs-danger-bg-subtle);
+}
