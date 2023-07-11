@@ -2,11 +2,11 @@ import { EventEmitter } from 'events';
 import { parse } from 'yaml';
 
 export interface TapStatistics {
-    passed: number;     // ok
-    skipped: number;    // ok      # skip
-    failed: number;     // not ok
-    xpassed: number;    // not ok  # todo
-    xfailed: number;    // ok      # todo
+    pass: number;    // ok
+    skip: number;    // ok      # skip
+    fail: number;    // not ok
+    xpass: number;   // not ok  # todo
+    xfail: number;   // ok      # todo
 }
 
 export class TapResult extends EventEmitter {
@@ -25,8 +25,8 @@ export class TapResult extends EventEmitter {
         this.ok = ok;
         this.number = number;
         this.description = description;
-        this.todo = (directive_type == 'TODO');
-        this.skip = (directive_type == 'SKIP');
+        this.todo = (directive_type === 'TODO');
+        this.skip = (directive_type === 'SKIP');
         this.reason = reason;
         this.comments = comments;
     }
@@ -40,13 +40,13 @@ export class TapResult extends EventEmitter {
         return this.attrs != null;
     }
 
-    get state() : keyof TapStatistics {
+    get status() : keyof TapStatistics {
         if (this.skip) {
-            return 'skipped'
+            return 'skip'
         } else if (this.todo) {
-            return this.ok ? 'xpassed' : 'xfailed';
+            return this.ok ? 'xpass' : 'xfail';
         } else {
-            return this.ok ? 'passed' : 'failed';
+            return this.ok ? 'pass' : 'fail';
         }
     }
 }
@@ -59,7 +59,7 @@ export class TapSession extends EventEmitter {
     epilogue: string[] = [];
     done: boolean = false;
 
-    stats: TapStatistics = { passed: 0, skipped: 0, failed: 0, xpassed: 0, xfailed: 0 };
+    stats: TapStatistics = { pass: 0, skip: 0, fail: 0, xpass: 0, xfail: 0 };
 
     #comments: string[];
     #current_result: TapResult | null = null;
@@ -73,7 +73,7 @@ export class TapSession extends EventEmitter {
     }
 
     reset_comments(): void {
-        if (this.results.length == this.plan) {
+        if (this.results.length === this.plan) {
             this.#comments = this.epilogue;
         } else {
             this.#comments = [];
@@ -85,15 +85,15 @@ export class TapSession extends EventEmitter {
             return false;
         }
 
-        if (this.#partial_yaml_block && line.match(/^  /)) {
+        if (this.#partial_yaml_block && line.match(/^ {2}/)) {
             // more data for an already-open yaml block
-            if (line == '  ...') {
+            if (line === '  ...') {
                 this.end_current_result();
             } else {
                 this.#partial_yaml_block.push(line);
             }
             return true;
-        } else if (line == '  ---\n') {
+        } else if (line === '  ---\n') {
             // start of a yaml block
             this.#partial_yaml_block = [];
             return true;
@@ -134,10 +134,11 @@ export class TapSession extends EventEmitter {
         this.results.push(result);
 
         this.stats = Object.assign({}, this.stats);
-        this.stats[result.state]++;
+        this.stats[result.status]++;
 
         this.reset_comments();
         this.#pending_changes.add('results');
+        this.#pending_changes.add('stats');
     }
 
     feed_line(line: string): void {
@@ -146,24 +147,24 @@ export class TapSession extends EventEmitter {
         /* See if the incoming line modifies the current result */
         if (this.modify_current_result(line)) {
             /* handled */
-        } else if (match = line.match(this.version_line_re)) {
+        } else if ((match = line.match(this.version_line_re))) {
             this.version_line(match);
-        } else if (match = line.match(this.plan_line_re)) {
+        } else if ((match = line.match(this.plan_line_re))) {
             this.plan_line(match);
-        } else if (match = line.match(this.result_line_re)) {
+        } else if ((match = line.match(this.result_line_re))) {
             this.result_line(match);
         } else {
             /* everything else gets treated as comments... */
             this.#comments.push(line);
+            if (this.#comments === this.prologue) {
+                this.#pending_changes.add('prologue');
+            }
         }
     }
 
     emit_pending_changes() {
-        if (this.#pending_changes) {
-            for (const change of this.#pending_changes) {
-                this.emit(change);
-            }
-            this.emit('changed');
+        if (this.#pending_changes.size) {
+            this.emit('notify', this.#pending_changes);
             this.#pending_changes = new Set();
         }
     }
@@ -174,7 +175,7 @@ export class TapSession extends EventEmitter {
 
         let start = 0;
         let end: number;
-        while ((end = input.indexOf('\n', start)) != -1) {
+        while ((end = input.indexOf('\n', start)) !== -1) {
             this.feed_line(this.#partial_line + input.slice(start, end + 1));
             this.#partial_line = '';
             start = end + 1;
@@ -193,6 +194,7 @@ export class TapSession extends EventEmitter {
         this.end_current_result();
         this.epilogue.push(...this.#comments);
         this.done = true;
+        this.#pending_changes.add('done');
         this.emit_pending_changes();
     }
 }
